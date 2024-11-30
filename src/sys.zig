@@ -164,8 +164,34 @@ pub const GetWindow = struct {
 
 pub const GetSystemInfo = struct {
     var sysInfo: win32.SYSTEM_INFO = undefined;
+    pub const c_name_format = win32.COMPUTER_NAME_FORMAT;
     pub fn init() !void {
         win32.GetSystemInfo(&sysInfo);
+    }
+
+    pub fn GetComputerName(format: win32.COMPUTER_NAME_FORMAT) ![]u8 {
+        var size: u32 = 0;
+
+        _ = win32.GetComputerNameExW(format, null, &size);
+        if (win32.GetLastError() != .ERROR_MORE_DATA) {
+            return error.FailedToGetComputerName;
+        }
+        const allocator = std.heap.page_allocator;
+        const buffer = try allocator.alloc(u16, size);
+        defer allocator.free(buffer);
+
+        if (win32.GetComputerNameExW(format, @ptrCast(buffer.ptr), &size) == 0) {
+            return error.FailedToGetComputerName;
+        }
+
+        const utf8Size = size * 3;
+
+        const result = try allocator.alloc(u8, utf8Size);
+        errdefer allocator.free(result);
+
+        const actual_size = try std.unicode.utf16leToUtf8(result, buffer[0..size]);
+
+        return try allocator.realloc(result, actual_size);
     }
 
     pub fn GetProcessorNum() u32 {
