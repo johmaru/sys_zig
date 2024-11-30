@@ -51,6 +51,9 @@
         //    // actually used.
         //    .lazy = false,
         //},
+        .zigwin32 = .{
+            .path = "mods/zigwin32",
+        },
     },
 
     // Specifies the set of files and directories that are included in this package.
