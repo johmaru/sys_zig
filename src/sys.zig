@@ -165,6 +165,26 @@ pub const GetWindow = struct {
 pub const GetSystemInfo = struct {
     var sysInfo: win32.SYSTEM_INFO = undefined;
     pub const c_name_format = win32.COMPUTER_NAME_FORMAT;
+    pub const Processor_relationship = win32.LOGICAL_PROCESSOR_RELATIONSHIP;
+
+    pub const Memsize = struct {
+        gb: ?bool = false,
+        mb: ?bool = false,
+        kb: ?bool = false,
+
+        pub fn toU64(self: *const Memsize, value: u64) u64 {
+            if (self.gb.?) {
+                return value / (1024 * 1024);
+            } else if (self.mb.?) {
+                return value / 1024;
+            } else if (self.kb.?) {
+                return value * 1024;
+            } else {
+                return value;
+            }
+        }
+    };
+
     pub fn init() !void {
         win32.GetSystemInfo(&sysInfo);
     }
@@ -194,7 +214,131 @@ pub const GetSystemInfo = struct {
         return try allocator.realloc(result, actual_size);
     }
 
-    pub fn GetProcessorNum() u32 {
-        return sysInfo.dwNumberOfProcessors;
+    pub fn GetDisplayIntegratedDisplaySize() f64 {
+        var displaySize: f64 = 0.0;
+        _ = win32.GetIntegratedDisplaySize(&displaySize);
+        return displaySize;
+    }
+
+    pub fn GetLocalTime() win32.SYSTEMTIME {
+        var localTime: win32.SYSTEMTIME = undefined;
+        win32.GetLocalTime(&localTime);
+        return localTime;
+    }
+
+    pub fn GetLogicalProcessorInfo(relation: win32.LOGICAL_PROCESSOR_RELATIONSHIP) !win32.SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX {
+        var size: u32 = 0;
+
+        _ = win32.GetLogicalProcessorInformationEx(relation, null, &size);
+        if (win32.GetLastError() != .ERROR_INSUFFICIENT_BUFFER) {
+            return error.FailedToGetLogicalProcessorInfo;
+        }
+
+        const allocator = std.heap.page_allocator;
+        const buffer = try allocator.create(win32.SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX);
+        defer allocator.destroy(buffer);
+
+        if (win32.GetLogicalProcessorInformationEx(relation, buffer, &size) == 0) {
+            return error.FailedToGetLogicalProcessorInfo;
+        }
+
+        return buffer.*;
+    }
+
+    pub fn GetNativeSystemInfo() win32.SYSTEM_INFO {
+        var n_sysInfo: win32.SYSTEM_INFO = undefined;
+        win32.GetNativeSystemInfo(&n_sysInfo);
+        return n_sysInfo;
+    }
+
+    pub fn GetMemorySpace(size: ?Memsize) u64 {
+        var value: u64 = undefined;
+        const ptr: *u64 = &value;
+        _ = win32.GetPhysicallyInstalledSystemMemory(@ptrCast(ptr));
+        if (size) |mem_size| {
+            return mem_size.toU64(value);
+        }
+
+        return value;
+    }
+
+    pub fn GetProcessorCycleTime(group: u16) !u64 {
+        const sys_info = GetNativeSystemInfo();
+        const max_groups = (sys_info.dwNumberOfProcessors + 63) / 64;
+        if (group >= max_groups) {
+            return error.InvalidProcessorGroup;
+        }
+
+        var return_length: u32 = 0;
+        _ = win32.GetProcessorSystemCycleTime(group, null, &return_length);
+        if (win32.GetLastError() != .ERROR_INSUFFICIENT_BUFFER) {
+            return error.FailedToGetProcessorCycleTime;
+        }
+
+        const allocator = std.heap.page_allocator;
+        const buffer = try allocator.alignedAlloc(u8, 8, return_length);
+        defer allocator.free(buffer);
+
+        if (win32.GetProcessorSystemCycleTime(group, @ptrCast(@alignCast(buffer.ptr)), &return_length) == 0) {
+            const err = win32.GetLastError();
+            std.debug.print("GetProcessorSystemCycleTime failed : {}\n", .{err});
+            return error.FailedToGetProcessorCycleTime;
+        }
+
+        const cycleTime = @as(*const u64, @ptrCast(buffer.ptr)).*;
+
+        return cycleTime;
+    }
+
+    pub fn GetSystemDirectory() ![]const u8 {
+        const size = win32.GetSystemDirectoryW(null, 0);
+        if (size == 0) {
+            return error.FailedToGetSystemDirectory;
+        }
+
+        const allocator = std.heap.page_allocator;
+        const buffer = try allocator.alloc(u16, size);
+
+        if (win32.GetSystemDirectoryW(@ptrCast(buffer.ptr), size) == 0) {
+            allocator.free(buffer);
+            return error.FailedToGetSystemDirectory;
+        }
+
+        const utf8Size = size * 3;
+        const result = try allocator.alloc(u8, utf8Size);
+        errdefer allocator.free(result);
+
+        const actual_size = try std.unicode.utf16leToUtf8(result, buffer[0..size]);
+
+        return try allocator.realloc(result, actual_size);
+    }
+
+    pub fn GetWindowsDirectory() ![]const u8 {
+        const size = win32.GetWindowsDirectoryW(null, 0);
+        if (size == 0) {
+            return error.FailedToGetWindowsDirectory;
+        }
+
+        const allocator = std.heap.page_allocator;
+        const buffer = try allocator.alloc(u16, size);
+
+        if (win32.GetWindowsDirectoryW(@ptrCast(buffer.ptr), size) == 0) {
+            allocator.free(buffer);
+            return error.FailedToGetWindowsDirectory;
+        }
+
+        const utf8Size = size * 3;
+        const result = try allocator.alloc(u8, utf8Size);
+        errdefer allocator.free(result);
+
+        const actual_size = try std.unicode.utf16leToUtf8(result, buffer[0..size]);
+
+        return try allocator.realloc(result, actual_size);
+    }
+
+    pub fn GetSystemTime() win32.SYSTEMTIME {
+        var systemTime: win32.SYSTEMTIME = undefined;
+        win32.GetSystemTime(&systemTime);
+        return systemTime;
     }
 };
